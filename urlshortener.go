@@ -1,20 +1,14 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 
 	"gopkg.in/yaml.v2"
 )
-
-var data = `
-hello: https://google.com
-hi: https://cloudflare.com
-heya: https://microsoft.com
-yoho: https://cloud.google.com
-bogus: notAurlHaha!
-`
 
 func readEntriesFromYaml(data []byte) map[string]string {
 	t := make(map[string]string)
@@ -37,7 +31,18 @@ func makeHandlersFromMap(mux *http.ServeMux, entries map[string]string) {
 }
 
 func main() {
-	entries := readEntriesFromYaml([]byte(data))
+	var filename string
+	flag.StringVar(&filename, "filename", "entries.yaml", "Name of the YAML file to read entries from.")
+	flag.Parse()
+
+	bytes, err := ioutil.ReadFile(filename)
+
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	entries := readEntriesFromYaml(bytes)
 	mux := http.NewServeMux()
 	makeHandlersFromMap(mux, entries)
 
