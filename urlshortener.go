@@ -4,7 +4,23 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+
+	"gopkg.in/yaml.v2"
 )
+
+var data = `
+hello: https://google.com
+hi: https://cloudflare.com
+heya: https://microsoft.com
+yoho: https://cloud.google.com
+bogus: notAurlHaha!
+`
+
+func readEntriesFromYaml(data []byte) map[string]string {
+	t := make(map[string]string)
+	yaml.Unmarshal(data, &t)
+	return t
+}
 
 func makeHandlersFromMap(mux *http.ServeMux, entries map[string]string) {
 	for shortcode, redirectUrl := range entries {
@@ -21,11 +37,7 @@ func makeHandlersFromMap(mux *http.ServeMux, entries map[string]string) {
 }
 
 func main() {
-	entries := make(map[string]string)
-	entries["hello"] = "https://google.com"
-	entries["hi"] = "https://cloudflare.com"
-	entries["heyho"] = "sfg3gGgj;"
-
+	entries := readEntriesFromYaml([]byte(data))
 	mux := http.NewServeMux()
 	makeHandlersFromMap(mux, entries)
 
