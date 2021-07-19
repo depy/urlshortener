@@ -1,50 +1,63 @@
 package main
 
 import (
-	"flag"
-	"fmt"
-	"io/ioutil"
+	"log"
 	"net/http"
-	"net/url"
+	"time"
 
-	"gopkg.in/yaml.v2"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"golang.org/x/net/context"
 )
 
-func readEntriesFromYaml(data []byte) map[string]string {
-	t := make(map[string]string)
-	yaml.Unmarshal(data, &t)
-	return t
-}
-
-func makeHandlersFromMap(mux *http.ServeMux, entries map[string]string) {
-	for shortcode, redirectUrl := range entries {
-		_, err := url.ParseRequestURI(redirectUrl)
-
-		if err != nil {
-			fmt.Println("Skipping", redirectUrl, "=> Error: ", err)
-			continue
-		}
-
-		path := "/" + shortcode
-		mux.Handle(path, http.RedirectHandler(redirectUrl, http.StatusMovedPermanently))
-	}
-}
+const (
+	dialTimeout    = 2 * time.Second
+	requestTimeout = 10 * time.Second
+)
 
 func main() {
-	var filename string
-	flag.StringVar(&filename, "filename", "entries.yaml", "Name of the YAML file to read entries from.")
-	flag.Parse()
+	etcdEndpoints := []string{"http://etcd:2379"}
 
-	bytes, err := ioutil.ReadFile(filename)
-
-	if err != nil {
-		fmt.Println(err)
-		return
+	cfg := clientv3.Config{
+		Endpoints:   etcdEndpoints,
+		DialTimeout: 5 * time.Second,
 	}
 
-	entries := readEntriesFromYaml(bytes)
+	etcdclient, err := clientv3.New(cfg)
+
+	if err != nil {
+		log.Println(err)
+	}
+
+	cli, _ := clientv3.New(clientv3.Config{
+		DialTimeout: dialTimeout,
+		Endpoints:   []string{"etcd:2379"},
+	})
+	defer cli.Close()
+
+	kv := clientv3.NewKV(cli)
+	defer etcdclient.Close()
+
 	mux := http.NewServeMux()
-	makeHandlersFromMap(mux, entries)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		ctx, _ := context.WithTimeout(context.Background(), requestTimeout)
+		redirectUrl := "https://motherfuckingwebsite.com" // default
+		key := r.URL.Path
+		response, err := kv.Get(ctx, key)
+
+		if err != nil {
+			log.Println(err)
+		}
+
+		for _, entry := range response.Kvs {
+			redirectUrl = string(entry.Value)
+			break
+		}
+
+		log.Println("Redirecting for", key, "to", redirectUrl)
+
+		w.Header().Set("Location", redirectUrl)
+		w.WriteHeader(http.StatusMovedPermanently)
+	})
 
 	s := &http.Server{
 		Addr:    ":8080",
