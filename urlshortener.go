@@ -10,16 +10,18 @@ import (
 )
 
 const (
-	dialTimeout    = 2 * time.Second
-	requestTimeout = 10 * time.Second
+	requestTimeout      = 10 * time.Second
+	dialTimeout         = 5 * time.Second
+	redirectFallbackUrl = "https://motherfuckingwebsite.com"
 )
 
-func main() {
-	etcdEndpoints := []string{"http://etcd:2379"}
+var etcdClient *clientv3.Client
+var etcdEndpoints = []string{"http://etcd:2379"}
 
+func newEtcdClient() *clientv3.Client {
 	cfg := clientv3.Config{
 		Endpoints:   etcdEndpoints,
-		DialTimeout: 5 * time.Second,
+		DialTimeout: dialTimeout,
 	}
 
 	etcdclient, err := clientv3.New(cfg)
@@ -28,36 +30,37 @@ func main() {
 		log.Println(err)
 	}
 
-	cli, _ := clientv3.New(clientv3.Config{
-		DialTimeout: dialTimeout,
-		Endpoints:   []string{"etcd:2379"},
-	})
-	defer cli.Close()
+	return etcdclient
+}
 
-	kv := clientv3.NewKV(cli)
-	defer etcdclient.Close()
+func etcdRedirectHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, _ := context.WithTimeout(context.Background(), requestTimeout)
+	redirectUrl := redirectFallbackUrl
+	key := r.URL.Path
+
+	response, err := etcdClient.Get(ctx, key)
+
+	if err != nil {
+		log.Println(err)
+	}
+
+	// Match the first entry it finds (currentl it's not handling duplicates)
+	for _, entry := range response.Kvs {
+		redirectUrl = string(entry.Value)
+		break
+	}
+
+	log.Println("Redirecting for", key, "to", redirectUrl)
+
+	w.Header().Set("Location", redirectUrl)
+	w.WriteHeader(http.StatusMovedPermanently)
+}
+
+func main() {
+	etcdClient = newEtcdClient()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		ctx, _ := context.WithTimeout(context.Background(), requestTimeout)
-		redirectUrl := "https://motherfuckingwebsite.com" // default
-		key := r.URL.Path
-		response, err := kv.Get(ctx, key)
-
-		if err != nil {
-			log.Println(err)
-		}
-
-		for _, entry := range response.Kvs {
-			redirectUrl = string(entry.Value)
-			break
-		}
-
-		log.Println("Redirecting for", key, "to", redirectUrl)
-
-		w.Header().Set("Location", redirectUrl)
-		w.WriteHeader(http.StatusMovedPermanently)
-	})
+	mux.HandleFunc("/", etcdRedirectHandler)
 
 	s := &http.Server{
 		Addr:    ":8080",
